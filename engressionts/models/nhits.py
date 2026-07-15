@@ -436,8 +436,7 @@ class _EnHiTSModule(PLForecastingModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        
-        x, _, _, _ = x_in
+        x, _, _ = x_in
 
         # if x1, x2,... y1, y2... is one multivariate ts containing x and y, and a1, a2... one covariate ts
         # we reshape into x1, y1, a1, x2, y2, a2... etc
@@ -477,22 +476,61 @@ class _EnHiTSModule(PLForecastingModule):
         )[:, :, : self.output_dim, :]
 
         return y
-    
-def training_step(self, batch, batch_idx):
-    """
-    Engression training step.
-    """
+    def training_step(self, batch, batch_idx):
+        """Train on ``M`` noise-perturbed forecasts using the Energy Score."""
+        (
+            past_target,
+            past_covariates,
+            historic_future_covariates,
+            future_covariates,
+            static_covariates,
+            _,
+            future_target,
+        ) = batch
 
-    (
-        past_target,
-        past_covariates,
-        historic_future_covariates,
-        future_covariates,
-        static_covariates,
-        future_target,
-    ) = batch
+        batch_size = future_target.shape[0]
 
-    return super().training_step(batch, batch_idx)
+        def _repeat(tensor):
+            return (
+                tensor.repeat_interleave(self.num_samples, dim=0)
+                if tensor is not None
+                else None
+            )
+
+        y_hat = self._produce_train_output(
+            (
+                _repeat(past_target),
+                _repeat(past_covariates),
+                _repeat(historic_future_covariates),
+                _repeat(future_covariates),
+                _repeat(static_covariates),
+            )
+        )
+
+        if y_hat.shape[-1] != 1:
+            raise ValueError(
+                "EnHiTS currently requires `likelihood=None`, because the "
+                "Energy Score is computed from forecast samples."
+            )
+
+        y_hat = y_hat.squeeze(-1)
+        samples = y_hat.view(
+            batch_size,
+            self.num_samples,
+            y_hat.shape[1],
+            y_hat.shape[2],
+        ).permute(1, 0, 2, 3)
+
+        loss = energy_score_loss(samples, future_target)
+        self.log(
+            "energy_score_train_loss",
+            loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        return loss
 
 
 class EnHiTSModel(PastCovariatesTorchModel):
@@ -887,5 +925,8 @@ class EnHiTSModel(PastCovariatesTorchModel):
             dropout=self.dropout,
             activation=self.activation,
             MaxPool1d=self.MaxPool1d,
+            noise_std=self.noise_std,
+            noise_type=self.noise_type,
+            num_samples=self.num_samples,
             **self.pl_module_params,
         )
