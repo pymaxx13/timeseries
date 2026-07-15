@@ -437,12 +437,18 @@ class _EnHiTSModule(PLForecastingModule):
     @io_processor
     def forward(self, x_in: PLModuleInput):
         x, _, _ = x_in
+        
+        print("INPUT:", x.dtype)
 
         # if x1, x2,... y1, y2... is one multivariate ts containing x and y, and a1, a2... one covariate ts
         # we reshape into x1, y1, a1, x2, y2, a2... etc
         x = self.noise_layer(x)
+        
+        print("AFTER NOISE:", x.dtype)
 
         x = torch.reshape(x, (x.shape[0], self.input_chunk_length_multi, 1))
+        
+        print("AFTER RESHAPE:", x.dtype)
         
         
         # squeeze last dimension (because model is univariate)
@@ -531,6 +537,15 @@ class _EnHiTSModule(PLForecastingModule):
             sync_dist=True,
         )
         return loss
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=None):
+        """Enable input noise while Darts generates prediction samples."""
+        noise_layer_was_training = self.noise_layer.training
+        self.noise_layer.train()
+        try:
+            return super().predict_step(batch, batch_idx, dataloader_idx)
+        finally:
+            self.noise_layer.train(noise_layer_was_training)
 
 
 class EnHiTSModel(PastCovariatesTorchModel):

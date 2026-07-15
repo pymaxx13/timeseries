@@ -6,3 +6,6 @@ env/
 # Python
 __pycache__/
 *.pyc
+
+# Downloaded experiment datasets
+.cache/
