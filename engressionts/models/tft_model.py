@@ -32,11 +32,10 @@ from darts.utils.data import TorchTrainingDataset
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.likelihood_models.torch import TorchLikelihood
 
-from engressionts.losses.energy_score import energy_score_loss
-from engressionts.noise.gaussian import GaussianNoise
+from engressionts.base.base_engression import EngressionPLModule
 
 
-class _TFTModule(PLForecastingModule):
+class _TFTModule(EngressionPLModule):
     def __init__(
         self,
         output_dim: tuple[int, int],
@@ -113,7 +112,12 @@ class _TFTModule(PLForecastingModule):
             base class.
         """
 
-        super().__init__(**kwargs)
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
 
         self.n_targets, self.loss_size = output_dim
         self.variables_meta = variables_meta
@@ -128,14 +132,6 @@ class _TFTModule(PLForecastingModule):
         self.dropout = dropout
         self.add_relative_index = add_relative_index
         self.skip_interpolation = skip_interpolation
-        self.noise_std = noise_std
-        self.noise_type = noise_type
-        self.num_samples = num_samples
-
-        if self.noise_type == "gaussian":
-            self.noise_layer = GaussianNoise(std=noise_std)
-        else:
-            raise ValueError(f"Unsupported noise type: {self.noise_type}")
 
         if isinstance(norm_type, str):
             try:
@@ -663,70 +659,6 @@ class _TFTModule(PLForecastingModule):
         self._decoder_sparse_weights = decoder_sparse_weights
         return out
 
-    def training_step(self, batch, batch_idx):
-        """Train on M noise-perturbed forecasts using the Energy Score."""
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-            _,
-            future_target,
-        ) = batch
-
-        batch_size = future_target.shape[0]
-
-        def _repeat(tensor):
-            return (
-                tensor.repeat_interleave(self.num_samples, dim=0)
-                if tensor is not None
-                else None
-            )
-
-        y_hat = self._produce_train_output(
-            (
-                _repeat(past_target),
-                _repeat(past_covariates),
-                _repeat(historic_future_covariates),
-                _repeat(future_covariates),
-                _repeat(static_covariates),
-            )
-        )
-
-        if y_hat.shape[-1] != 1:
-            raise ValueError(
-                "EnTFT currently requires `likelihood=None`, because the "
-                "Energy Score is computed from forecast samples."
-            )
-
-        y_hat = y_hat.squeeze(-1)
-        samples = y_hat.view(
-            batch_size,
-            self.num_samples,
-            y_hat.shape[1],
-            y_hat.shape[2],
-        ).permute(1, 0, 2, 3)
-
-        loss = energy_score_loss(samples, future_target)
-        self.log(
-            "energy_score_train_loss",
-            loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        return loss
-
-    def predict_step(self, batch, batch_idx, dataloader_idx=None):
-        """Enable input noise while Darts generates prediction samples."""
-        noise_layer_was_training = self.noise_layer.training
-        self.noise_layer.train()
-        try:
-            return super().predict_step(batch, batch_idx, dataloader_idx)
-        finally:
-            self.noise_layer.train(noise_layer_was_training)
 
 
 class TFTModel(MixedCovariatesTorchModel):
