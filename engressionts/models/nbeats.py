@@ -11,10 +11,7 @@ import torch
 import torch.nn as nn
 
 from darts.logging import raise_log
-from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
-    io_processor,
-)
+from darts.models.forecasting.pl_forecasting_module import io_processor
 from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
@@ -373,7 +370,7 @@ class _EnBEATSModule(EngressionPLModule):
         activation: str,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 10,  
+        num_samples: int = 20,
         **kwargs,
     ):
         """PyTorch module implementing the N-BEATS architecture.
@@ -562,7 +559,7 @@ class EnBEATSModel(PastCovariatesTorchModel):
         activation: str = "ReLU",
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 10,
+        num_samples: int = 20,
         **kwargs,
     ):
         """Neural Basis Expansion Analysis Time Series Forecasting (N-BEATS).
