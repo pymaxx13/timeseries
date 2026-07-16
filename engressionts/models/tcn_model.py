@@ -21,8 +21,7 @@ from darts.utils.data import ShiftedTorchTrainingDataset, TorchTrainingDataset
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
 
-from engressionts.losses.energy_score import energy_score_loss
-from engressionts.noise.gaussian import GaussianNoise
+from engressionts.base.base_engression import EngressionPLModule
 
 logger = get_logger(__name__)
 
@@ -134,7 +133,7 @@ class _ResidualBlock(nn.Module):
         return x
 
 
-class _EnTCNModule(PLForecastingModule):
+class _EnTCNModule(EngressionPLModule):
     def __init__(
         self,
         input_size: int,
@@ -194,7 +193,12 @@ class _EnTCNModule(PLForecastingModule):
             leading up to the first prediction, all in chronological order.
         """
 
-        super().__init__(**kwargs)
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
 
         # Defining parameters
         self.input_size = input_size
@@ -204,15 +208,6 @@ class _EnTCNModule(PLForecastingModule):
         self.target_size = target_size
         self.nr_params = nr_params
         self.dilation_base = dilation_base
-        
-        self.noise_std = noise_std
-        self.noise_type = noise_type
-        self.num_samples = num_samples
-        
-        if noise_type == "gaussian":
-            self.noise_layer = GaussianNoise(std=noise_std)
-        else:
-            raise ValueError(f"Unsupported noise type: {noise_type}")
 
         # If num_layers is not passed, compute number of layers needed for full history coverage
         if num_layers is None and dilation_base > 1:
@@ -269,71 +264,6 @@ class _EnTCNModule(PLForecastingModule):
         )
 
         return x
-
-    def training_step(self, batch, batch_idx):
-        """Train on ``M`` noise-perturbed forecasts using the Energy Score."""
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-            _,
-            future_target,
-        ) = batch
-
-        batch_size = future_target.shape[0]
-
-        def _repeat(tensor):
-            return (
-                tensor.repeat_interleave(self.num_samples, dim=0)
-                if tensor is not None
-                else None
-            )
-
-        y_hat = self._produce_train_output(
-            (
-                _repeat(past_target),
-                _repeat(past_covariates),
-                _repeat(historic_future_covariates),
-                _repeat(future_covariates),
-                _repeat(static_covariates),
-            )
-        )
-
-        if y_hat.shape[-1] != 1:
-            raise ValueError(
-                "EnTCN currently requires `likelihood=None`, because the "
-                "Energy Score is computed from forecast samples."
-            )
-
-        y_hat = y_hat.squeeze(-1)
-        samples = y_hat.view(
-            batch_size,
-            self.num_samples,
-            y_hat.shape[1],
-            y_hat.shape[2],
-        ).permute(1, 0, 2, 3)
-
-        loss = energy_score_loss(samples, future_target)
-        self.log(
-            "energy_score_train_loss",
-            loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        return loss
-
-    def predict_step(self, batch, batch_idx, dataloader_idx=None):
-        """Enable input noise while Darts generates prediction samples."""
-        noise_layer_was_training = self.noise_layer.training
-        self.noise_layer.train()
-        try:
-            return super().predict_step(batch, batch_idx, dataloader_idx)
-        finally:
-            self.noise_layer.train(noise_layer_was_training)
 
     @property
     def first_prediction_index(self) -> int:
