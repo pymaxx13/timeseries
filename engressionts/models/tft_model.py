@@ -15,14 +15,24 @@ from darts import TimeSeries
 from darts.logging import raise_log
 from darts.models.components import glu_variants, layer_norm_variants
 from darts.models.components.glu_variants import GLU_FFN
-from darts.models.components.tft_submodels import (
-    _GateAddNorm,
-    _GatedResidualNetwork,
-    _InterpretableMultiHeadAttention,
-    _MultiEmbedding,
-    _VariableSelectionNetwork,
-    get_embedding_size,
-)
+try:
+    from darts.models.components.tft_submodels import (
+        _GateAddNorm,
+        _GatedResidualNetwork,
+        _InterpretableMultiHeadAttention,
+        _MultiEmbedding,
+        _VariableSelectionNetwork,
+        get_embedding_size,
+    )
+except ModuleNotFoundError:  # pragma: no cover - compatibility for newer Darts
+    from darts.models.forecasting.tft_submodels import (
+        _GateAddNorm,
+        _GatedResidualNetwork,
+        _InterpretableMultiHeadAttention,
+        _MultiEmbedding,
+        _VariableSelectionNetwork,
+        get_embedding_size,
+    )
 from darts.models.forecasting.pl_forecasting_module import (
     PLForecastingModule,
     io_processor,
@@ -661,7 +671,7 @@ class _TFTModule(EngressionPLModule):
 
 
 
-class TFTModel(MixedCovariatesTorchModel):
+class EnTFTModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
@@ -1004,6 +1014,7 @@ class TFTModel(MixedCovariatesTorchModel):
         self.output_dim: tuple[int, int] | None = None
         self.norm_type = norm_type
         self._considers_static_covariates = use_static_covariates
+
 
     def _create_model(self, train_sample: TorchTrainingSample) -> PLForecastingModule:
         """
