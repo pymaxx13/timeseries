@@ -12,10 +12,7 @@ import torch.nn.functional as F
 
 from darts import TimeSeries
 from darts.logging import get_logger, raise_log
-from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
-    io_processor,
-)
+from darts.models.forecasting.pl_forecasting_module import io_processor
 from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorchModel
 from darts.utils.data import ShiftedTorchTrainingDataset, TorchTrainingDataset
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
@@ -148,7 +145,7 @@ class _EnTCNModule(EngressionPLModule):
         dropout: float,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 10,
+        num_samples: int = 20,
         **kwargs,
     ):
         """PyTorch module implementing a dilated TCN module used in `TCNModel`.
@@ -271,6 +268,10 @@ class _EnTCNModule(EngressionPLModule):
 
 
 class EnTCNModel(PastCovariatesTorchModel):
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
     def __init__(
         self,
         input_chunk_length: int,
@@ -284,7 +285,7 @@ class EnTCNModel(PastCovariatesTorchModel):
         dropout: float = 0.2,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 10,
+        num_samples: int = 20,
         **kwargs,
     ):
         """Temporal Convolutional Network Model (TCN).
