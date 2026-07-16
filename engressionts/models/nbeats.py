@@ -622,6 +622,10 @@ class _EnBEATSModule(PLForecastingModule):
 
 
 class EnBEATSModel(PastCovariatesTorchModel):
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
     def __init__(
         self,
         input_chunk_length: int,
