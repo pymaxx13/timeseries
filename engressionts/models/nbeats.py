@@ -19,8 +19,7 @@ from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorch
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
 
-from engressionts.noise.gaussian import GaussianNoise
-from engressionts.losses.energy_score import energy_score_loss
+from engressionts.base.base_engression import EngressionPLModule
 
 ACTIVATIONS = [
     "ReLU",
@@ -356,7 +355,7 @@ class _Stack(nn.Module):
         return stack_residual, stack_forecast
 
 
-class _EnBEATSModule(PLForecastingModule):
+class _EnBEATSModule(EngressionPLModule):
     def __init__(
         self,
         input_dim: int,
@@ -427,16 +426,12 @@ class _EnBEATSModule(PLForecastingModule):
             Tensor containing the output of the NBEATS module.
 
         """
-        super().__init__(**kwargs)
-        
-        self.noise_std = noise_std
-        self.noise_type = noise_type
-        self.num_samples = num_samples
-        
-        if self.noise_type == "gaussian":
-            self.noise_layer = GaussianNoise(self.noise_std)
-        else:
-            raise ValueError(f"Unsupported noise type: {self.noise_type}")
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
 
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -506,17 +501,6 @@ class _EnBEATSModule(PLForecastingModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        print("=" * 60)
-        print("FORWARD CALLED")
-        print("type(x_in):", type(x_in))
-        print("len(x_in):", len(x_in))
-        print("contents:")
-
-        for i, item in enumerate(x_in):
-            if item is None:
-                print(f"  [{i}] None")
-            else:
-                print(f"  [{i}] shape={item.shape}")
         x, _, _ = x_in
 
         # if x1, x2,... y1, y2... is one multivariate ts containing x and y, and a1, a2... one covariate ts
@@ -555,70 +539,6 @@ class _EnBEATSModule(PLForecastingModule):
 
         return y
 
-    def training_step(self, batch, batch_idx):
-        """Train on ``M`` noise-perturbed forecasts using the Energy Score."""
-        (
-            past_target,
-            past_covariates,
-            historic_future_covariates,
-            future_covariates,
-            static_covariates,
-            _,
-            future_target,
-        ) = batch
-
-        batch_size = future_target.shape[0]
-
-        def _repeat(tensor):
-            return (
-                tensor.repeat_interleave(self.num_samples, dim=0)
-                if tensor is not None
-                else None
-            )
-
-        y_hat = self._produce_train_output(
-            (
-                _repeat(past_target),
-                _repeat(past_covariates),
-                _repeat(historic_future_covariates),
-                _repeat(future_covariates),
-                _repeat(static_covariates),
-            )
-        )
-
-        if y_hat.shape[-1] != 1:
-            raise ValueError(
-                "EnBEATS currently requires `likelihood=None`, because the "
-                "Energy Score is computed from forecast samples."
-            )
-
-        y_hat = y_hat.squeeze(-1)
-        samples = y_hat.view(
-            batch_size,
-            self.num_samples,
-            y_hat.shape[1],
-            y_hat.shape[2],
-        ).permute(1, 0, 2, 3)
-
-        loss = energy_score_loss(samples, future_target)
-        self.log(
-            "energy_score_train_loss",
-            loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        return loss
-    
-    def predict_step(self, batch, batch_idx, dataloader_idx=None):
-        """Enable input noise while Darts generates prediction samples."""
-        noise_layer_was_training = self.noise_layer.training
-        self.noise_layer.train()
-        try:
-            return super().predict_step(batch, batch_idx, dataloader_idx)
-        finally:
-            self.noise_layer.train(noise_layer_was_training)
 
 
 class EnBEATSModel(PastCovariatesTorchModel):
