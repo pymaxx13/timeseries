@@ -9,10 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from darts.logging import get_logger, raise_log
-from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
-    io_processor,
-)
+from darts.models.forecasting.pl_forecasting_module import io_processor
 from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
@@ -336,7 +333,7 @@ class _EnHiTSModule(EngressionPLModule):
         MaxPool1d: bool,
         noise_std: float = 0.1,
         noise_type: str = "gaussian",
-        num_samples: int = 10,
+        num_samples: int = 20,
         **kwargs,
     ):
         """PyTorch module implementing the N-HiTS architecture.
@@ -473,6 +470,10 @@ class _EnHiTSModule(EngressionPLModule):
 
 
 class EnHiTSModel(PastCovariatesTorchModel):
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
     def __init__(
         self,
         input_chunk_length: int,
@@ -489,7 +490,7 @@ class EnHiTSModel(PastCovariatesTorchModel):
         MaxPool1d: bool = True,
         noise_std: float = 0.1,
         noise_type: str = "gaussian",
-        num_samples: int = 10,
+        num_samples: int = 20,
         **kwargs,
     ):
         """An implementation of the N-HiTS model, as presented in [1]_.
