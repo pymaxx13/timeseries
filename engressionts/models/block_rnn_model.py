@@ -598,7 +598,7 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
-            **dict(self.pl_module_params),
+            **dict(self.pl_module_params or {}),
             **kwargs,
         )
 
