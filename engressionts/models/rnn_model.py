@@ -129,8 +129,7 @@ class CustomRNNModule(EngressionPLModule, ABC):
     def _process_input_batch(self, input_batch: TorchBatch) -> PLModuleInput:
         (
             past_target,
-            _,  # past covariates
-            _,  # historic future covariates
+            _,
             future_covariates,
             static_covariates,
             future_target,
@@ -143,7 +142,6 @@ class CustomRNNModule(EngressionPLModule, ABC):
             None,
             None,
             static_covariates,
-            future_target,
         )
         return super()._process_input_batch(input_batch)
 
@@ -195,7 +193,6 @@ class CustomRNNModule(EngressionPLModule, ABC):
             input_series,
             None,
             static_covariates,
-            None,
         ))
         batch_prediction.append(out[:, -1:, :])
         prediction_length = 1
@@ -216,7 +213,7 @@ class CustomRNNModule(EngressionPLModule, ABC):
 
             # feed new input to model, including the last hidden state from the previous iteration
             out, last_hidden_state = self._produce_predict_output(
-                (new_input, None, static_covariates, None), last_hidden_state
+                (new_input, None, static_covariates), last_hidden_state
             )
 
             # append prediction to batch prediction array, increase counter
@@ -291,7 +288,7 @@ class _EnRNNModule(CustomRNNModule):
     def forward(
         self, x_in: PLModuleInput, h: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x, _, _, _ = x_in
+        x, _, _ = x_in
 
         x = self.noise_layer(x)
 
@@ -619,7 +616,7 @@ class EnRNNModel(DualCovariatesTorchModel):
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
-            **self.pl_module_params,
+            **dict(self.pl_module_params or {}),
             **kwargs,
         )
 
