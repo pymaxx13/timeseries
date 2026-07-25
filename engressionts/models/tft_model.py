@@ -1202,7 +1202,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
             noise_type=self.noise_type,
             num_samples=self.num_samples,
             norm_type=self.norm_type,
-            **self.pl_module_params,
+            **dict(self.pl_module_params or {}),
         )
 
     def _build_train_dataset(
