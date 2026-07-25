@@ -7,11 +7,12 @@ import torch
 import torch.nn as nn
 
 from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
     io_processor,
 )
 from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
+
+from engressionts.base.base_engression import EngressionPLModule
 
 
 class _MovingAvg(nn.Module):
@@ -55,7 +56,7 @@ class _SeriesDecomp(nn.Module):
         return res, moving_mean
 
 
-class _DLinearModule(PLForecastingModule):
+class _EnDLinearModule(EngressionPLModule):
     """
     DLinear module
     """
@@ -70,6 +71,9 @@ class _DLinearModule(PLForecastingModule):
         shared_weights: bool,
         kernel_size: int,
         const_init: bool,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ):
         """PyTorch module implementing the DLinear architecture.
@@ -108,7 +112,12 @@ class _DLinearModule(PLForecastingModule):
             Tensor containing the output of the NBEATS module.
         """
 
-        super().__init__(**kwargs)
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.future_cov_dim = future_cov_dim
@@ -156,7 +165,8 @@ class _DLinearModule(PLForecastingModule):
             `x_future` is the output/future chunk. Input dimensions are `(n_samples, n_time_steps, n_variables)`
         """
 
-        x, x_future, x_static, _ = x_in  # x: (batch, in_len, in_dim)
+        x, x_future, x_static = x_in  # x: (batch, in_len, in_dim)
+        x = self.noise_layer(x)
         batch, _, _ = x.shape
 
         if self.shared_weights:
@@ -220,7 +230,7 @@ class _DLinearModule(PLForecastingModule):
         return x
 
 
-class DLinearModel(MixedCovariatesTorchModel):
+class EnDLinearModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
@@ -230,6 +240,9 @@ class DLinearModel(MixedCovariatesTorchModel):
         kernel_size: int = 25,
         const_init: bool = True,
         use_static_covariates: bool = True,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ):
         """An implementation of the DLinear model, as presented in [1]_.
@@ -463,6 +476,7 @@ class DLinearModel(MixedCovariatesTorchModel):
             transform the input data, increase the number of epochs, use a validation set, optimize the hyper-
             parameters, ...
         """
+        kwargs.setdefault("likelihood", None)
         super().__init__(**self._extract_torch_model_params(**self.model_params))
 
         # extract pytorch lightning module kwargs
@@ -473,7 +487,11 @@ class DLinearModel(MixedCovariatesTorchModel):
         self.const_init = const_init
         self._considers_static_covariates = use_static_covariates
 
-    def _create_model(self, train_sample: TorchTrainingSample) -> PLForecastingModule:
+        self.noise_std = noise_std
+        self.noise_type = noise_type
+        self.num_samples = num_samples
+
+    def _create_model(self, train_sample: TorchTrainingSample) -> torch.nn.Module:
         # samples are made of (past target, past cov, historic future cov, future cov, static cov, future_target)
         (past_target, past_covariates, _, future_covariates, static_covariates, _) = (
             train_sample
@@ -497,7 +515,7 @@ class DLinearModel(MixedCovariatesTorchModel):
         output_dim = past_target.shape[1]
         nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
 
-        return _DLinearModule(
+        return _EnDLinearModule(
             input_dim=input_dim,
             output_dim=output_dim,
             future_cov_dim=future_cov_dim,
@@ -506,7 +524,10 @@ class DLinearModel(MixedCovariatesTorchModel):
             shared_weights=self.shared_weights,
             kernel_size=self.kernel_size,
             const_init=self.const_init,
-            **self.pl_module_params,
+            noise_std=self.noise_std,
+            noise_type=self.noise_type,
+            num_samples=self.num_samples,
+            **dict(self.pl_module_params or {}),
         )
 
     @property
@@ -520,3 +541,11 @@ class DLinearModel(MixedCovariatesTorchModel):
     @property
     def supports_past_covariates(self) -> bool:
         return not self.shared_weights
+
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
+
+DLinearModel = EnDLinearModel
+_DLinearModule = _EnDLinearModule
