@@ -245,7 +245,7 @@ class _EnTCNModule(EngressionPLModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        x, _, _, _ = x_in
+        x, _, _ = x_in
 
         x = self.noise_layer(x)
         # data is of size (batch_size, input_chunk_length, input_size)
@@ -562,7 +562,7 @@ class EnTCNModel(PastCovariatesTorchModel):
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
-            **self.pl_module_params,
+            **dict(self.pl_module_params or {}),
         )
 
     def _build_train_dataset(
