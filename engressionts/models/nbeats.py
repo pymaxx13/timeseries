@@ -867,5 +867,5 @@ class EnBEATSModel(PastCovariatesTorchModel):
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
-            **self.pl_module_params,
+            **dict(self.pl_module_params or {}),
         )
