@@ -30,12 +30,13 @@ from torch import nn
 from darts.logging import raise_log
 from darts.models.components import layer_norm_variants
 from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
     io_processor,
 )
 from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
+
+from engressionts.base.base_engression import EngressionPLModule
 
 ACTIVATIONS = [
     "ReLU",
@@ -304,7 +305,7 @@ class _ConditionalMixerLayer(nn.Module):
         return x
 
 
-class _TSMixerModule(PLForecastingModule):
+class _EnTSMixerModule(EngressionPLModule):
     def __init__(
         self,
         input_dim: int,
@@ -320,6 +321,9 @@ class _TSMixerModule(PLForecastingModule):
         dropout: float,
         norm_type: str | nn.Module,
         normalize_before: bool,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ) -> None:
         """
@@ -355,7 +359,12 @@ class _TSMixerModule(PLForecastingModule):
         normalize_before
             Whether to apply normalization before or after mixing.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.future_cov_dim = future_cov_dim
@@ -476,7 +485,8 @@ class _TSMixerModule(PLForecastingModule):
         # N_P: likelihood parameters
 
         # `x`: (B, L, H), `x_future`: (B, T, F), `x_static`: (B, C or 1, S)
-        x, x_future, x_static, _ = x_in
+        x, x_future, x_static = x_in
+        x = self.noise_layer(x)
 
         # swap feature and time dimensions (B, L, H) -> (B, H, L)
         x = _time_to_feature(x)
@@ -510,7 +520,7 @@ class _TSMixerModule(PLForecastingModule):
         return x
 
 
-class TSMixerModel(MixedCovariatesTorchModel):
+class EnTSMixerModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
@@ -524,6 +534,9 @@ class TSMixerModel(MixedCovariatesTorchModel):
         norm_type: str | nn.Module = "LayerNorm",
         normalize_before: bool = False,
         use_static_covariates: bool = True,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ) -> None:
         """Time-Series Mixer (TSMixer): An All-MLP Architecture for Time Series.
@@ -762,6 +775,7 @@ class TSMixerModel(MixedCovariatesTorchModel):
          [4.4122863 ]
          [4.42762751]]
         """
+        kwargs.setdefault("likelihood", None)
         model_kwargs = {key: val for key, val in self.model_params.items()}
         super().__init__(**self._extract_torch_model_params(**model_kwargs))
 
@@ -777,6 +791,10 @@ class TSMixerModel(MixedCovariatesTorchModel):
         self.norm_type = norm_type
         self.hidden_size = hidden_size
         self._considers_static_covariates = use_static_covariates
+
+        self.noise_std = noise_std
+        self.noise_type = noise_type
+        self.num_samples = num_samples
 
     def _create_model(self, train_sample: TorchTrainingSample) -> nn.Module:
         """
@@ -813,7 +831,7 @@ class TSMixerModel(MixedCovariatesTorchModel):
         past_cov_dim = past_covariates.shape[1] if past_covariates is not None else 0
         nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
 
-        return _TSMixerModule(
+        return _EnTSMixerModule(
             input_dim=input_dim,
             output_dim=output_dim,
             future_cov_dim=future_cov_dim,
@@ -827,9 +845,20 @@ class TSMixerModel(MixedCovariatesTorchModel):
             dropout=self.dropout,
             norm_type=self.norm_type,
             normalize_before=self.normalize_before,
+            noise_std=self.noise_std,
+            noise_type=self.noise_type,
+            num_samples=self.num_samples,
             **dict(self.pl_module_params or {}),
         )
 
     @property
     def supports_static_covariates(self) -> bool:
         return True
+
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
+
+TSMixerModel = EnTSMixerModel
+_TSMixerModule = _EnTSMixerModule

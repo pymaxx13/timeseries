@@ -8,12 +8,13 @@ import torch.nn as nn
 
 from darts.logging import get_logger, raise_log
 from darts.models.forecasting.pl_forecasting_module import (
-    PLForecastingModule,
     io_processor,
 )
 from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
+
+from engressionts.base.base_engression import EngressionPLModule
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,7 @@ class _ResidualBlock(nn.Module):
         return x
 
 
-class _TideModule(PLForecastingModule):
+class _EnTideModule(EngressionPLModule):
     def __init__(
         self,
         input_dim: int,
@@ -77,6 +78,9 @@ class _TideModule(PLForecastingModule):
         dropout: float,
         temporal_hidden_size_past: int | None = None,
         temporal_hidden_size_future: int | None = None,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ):
         """Pytorch module implementing the TiDE architecture.
@@ -131,7 +135,12 @@ class _TideModule(PLForecastingModule):
 
         """
 
-        super().__init__(**kwargs)
+        super().__init__(
+            noise_std=noise_std,
+            noise_type=noise_type,
+            num_samples=num_samples,
+            **kwargs,
+        )
 
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -276,7 +285,8 @@ class _TideModule(PLForecastingModule):
         # x has shape (batch_size, input_chunk_length, input_dim)
         # x_future_covariates has shape (batch_size, input_chunk_length, future_cov_dim)
         # x_static_covariates has shape (batch_size, static_cov_dim)
-        x, x_future_covariates, x_static_covariates, _ = x_in
+        x, x_future_covariates, x_static_covariates = x_in
+        x = self.noise_layer(x)
 
         x_lookback = x[:, :, : self.output_dim]
 
@@ -363,7 +373,7 @@ class _TideModule(PLForecastingModule):
         return y
 
 
-class TiDEModel(MixedCovariatesTorchModel):
+class EnTiDEModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
@@ -381,6 +391,9 @@ class TiDEModel(MixedCovariatesTorchModel):
         use_layer_norm: bool = False,
         dropout: float = 0.1,
         use_static_covariates: bool = True,
+        noise_std: float = 1.0,
+        noise_type: str = "gaussian",
+        num_samples: int = 20,
         **kwargs,
     ):
         """An implementation of the TiDE model, as presented in [1]_.
@@ -640,6 +653,7 @@ class TiDEModel(MixedCovariatesTorchModel):
                     "`temporal_width_past` and `temporal_width_future` must be >= 0."
                 ),
             )
+        kwargs.setdefault("likelihood", None)
         super().__init__(**self._extract_torch_model_params(**self.model_params))
 
         # extract pytorch lightning module kwargs
@@ -659,6 +673,10 @@ class TiDEModel(MixedCovariatesTorchModel):
 
         self.use_layer_norm = use_layer_norm
         self.dropout = dropout
+
+        self.noise_std = noise_std
+        self.noise_type = noise_type
+        self.num_samples = num_samples
 
     def _create_model(self, train_sample: TorchTrainingSample) -> torch.nn.Module:
         (
@@ -706,7 +724,7 @@ class TiDEModel(MixedCovariatesTorchModel):
                 f"number of covariates: {future_cov_dim}, `temporal_width_future={self.temporal_width_future}`."
             )
 
-        return _TideModule(
+        return _EnTideModule(
             input_dim=input_dim,
             output_dim=output_dim,
             future_cov_dim=future_cov_dim,
@@ -723,6 +741,9 @@ class TiDEModel(MixedCovariatesTorchModel):
             temporal_decoder_hidden=self.temporal_decoder_hidden,
             use_layer_norm=self.use_layer_norm,
             dropout=self.dropout,
+            noise_std=self.noise_std,
+            noise_type=self.noise_type,
+            num_samples=self.num_samples,
             **dict(self.pl_module_params or {}),
         )
 
@@ -737,3 +758,11 @@ class TiDEModel(MixedCovariatesTorchModel):
     @property
     def supports_static_covariates(self) -> bool:
         return True
+
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
+
+TiDEModel = EnTiDEModel
+_TideModule = _EnTideModule

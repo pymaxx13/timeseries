@@ -16,7 +16,7 @@ from darts.logging import raise_log
 from darts.models.components import glu_variants, layer_norm_variants
 from darts.models.components.glu_variants import GLU_FFN
 try:
-    from darts.models.components.tft_submodels import (
+    from darts.models.forecasting.tft_submodels import (
         _GateAddNorm,
         _GatedResidualNetwork,
         _InterpretableMultiHeadAttention,
@@ -487,7 +487,7 @@ class _TFTModule(EngressionPLModule):
         torch.Tensor
             the output tensor
         """
-        x_cont_past, x_cont_future, x_static, _ = x_in
+        x_cont_past, x_cont_future, x_static = x_in
         dim_samples, dim_time, dim_variable = 0, 1, 2
         device = x_in[0].device
 
