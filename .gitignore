@@ -9,3 +9,15 @@ __pycache__/
 
 # Downloaded experiment datasets
 .cache/
+
+# IDEs
+.vscode/
+
+# Testing
+.pytest_cache/
+
+# Training logs, checkpoints, and parameter files
+lightning_logs/
+*.ckpt
+hparams.yaml
+*.pdf
