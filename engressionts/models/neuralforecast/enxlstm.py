@@ -18,7 +18,7 @@ try:
     from xlstm.xlstm_block_stack import xLSTMBlockStack, xLSTMBlockStackConfig
 
     IS_XLSTM_INSTALLED = True
-except ImportError:
+except (ImportError, OSError):
     IS_XLSTM_INSTALLED = False
 
 
