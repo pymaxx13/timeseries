@@ -227,7 +227,7 @@ class _EnBlockRNNModule(CustomBlockRNNModule):
         # N_P: likelihood parameters
 
         # `x_past`: (B, L, H), `x_future`: (B, T, F), `x_static`: (B, C or 1 = C1, S)
-        x_past, x_future, x_static = x_in
+        x_past, x_future, x_static = x_in[:3]
 
         x_past = self.noise_layer(x_past)
 
