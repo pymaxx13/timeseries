@@ -288,7 +288,7 @@ class _EnRNNModule(CustomRNNModule):
     def forward(
         self, x_in: PLModuleInput, h: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x, _, _ = x_in
+        x = x_in[0]
 
         x = self.noise_layer(x)
 
