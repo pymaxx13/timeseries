@@ -2,7 +2,7 @@ import torch
 from typing import List, Optional, Union
 from neuralforecast.losses.pytorch import BasePointLoss, level_to_outputs, quantiles_to_outputs
 
-def energy_score_loss(samples: torch.Tensor, target: torch.Tensor, mask) -> torch.Tensor:
+def energy_score_loss(samples: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """
     samples: (M, batch, len, dim) - M stochastic samples
     target: (batch, len, dim) - Ground truth
