@@ -245,7 +245,7 @@ class _EnTCNModule(EngressionPLModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        x, _, _ = x_in
+        x = x_in[0]
 
         x = self.noise_layer(x)
         # data is of size (batch_size, input_chunk_length, input_size)
