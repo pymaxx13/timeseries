@@ -75,6 +75,7 @@ class EngressionPLModule(PLForecastingModule):
                 self._repeat_tensor(historic_future_covariates),
                 self._repeat_tensor(future_covariates),
                 self._repeat_tensor(static_covariates),
+                self._repeat_tensor(future_target) # <-- Rajdeep testing
             )
         )
 
