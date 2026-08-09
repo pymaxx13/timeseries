@@ -396,7 +396,6 @@ class _EnHiTSModule(EngressionPLModule):
         self.nr_params = nr_params
         self.input_chunk_length_multi = self.input_chunk_length * input_dim
 
-        # TODO: shouldn't this be output_dim?
         self.output_chunk_length_multi = self.output_chunk_length * input_dim
 
         self.stacks_list = [
@@ -428,7 +427,8 @@ class _EnHiTSModule(EngressionPLModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        x, _, _ = x_in
+        #x, _, _ = x_in
+        x = x_in[0]
 
         # if x1, x2,... y1, y2... is one multivariate ts containing x and y, and a1, a2... one covariate ts
         # we reshape into x1, y1, a1, x2, y2, a2... etc
