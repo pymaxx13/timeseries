@@ -503,7 +503,7 @@ class _EnChronos2Module(EngressionPLModule):
             probabilistic forecasts, or `(n_samples, n_time_steps, n_targets, 1)` for
             deterministic forecasts (median only).
         """
-        x_past, x_future, _ = x_in
+        x_past, x_future, _ = x_in[:3]
 
         # engression noise injection: applied to the past target/context right after
         # unpacking the model input, before any Chronos-2 computation begins
