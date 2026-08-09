@@ -285,17 +285,7 @@ class _EnTideModule(EngressionPLModule):
         # x has shape (batch_size, input_chunk_length, input_dim)
         # x_future_covariates has shape (batch_size, input_chunk_length, future_cov_dim)
         # x_static_covariates has shape (batch_size, static_cov_dim)
-        x, x_future_covariates, x_static_covariates = x_in[:3]
-
-        # Handle fallback if it's already a 3-element tuple
-        elif len(x_in) == 3:
-            x, x_future_covariates, x_static_covariates = x_in
-
-        else:
-            raise ValueError(f"TiDEModel expected 3 or >=5 elements in x_in, got {len(x_in)}")
-
-
-        
+        x, x_future_covariates, x_static_covariates = x_in[:3]        
         x = self.noise_layer(x)
 
         x_lookback = x[:, :, : self.output_dim]
