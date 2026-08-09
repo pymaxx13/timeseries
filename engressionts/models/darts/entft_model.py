@@ -487,7 +487,7 @@ class _TFTModule(EngressionPLModule):
         torch.Tensor
             the output tensor
         """
-        x_cont_past, x_cont_future, x_static = x_in
+        x_cont_past, x_cont_future, x_static = x_in[:3]
         dim_samples, dim_time, dim_variable = 0, 1, 2
         device = x_in[0].device
 
