@@ -16,7 +16,7 @@ from darts.logging import raise_log
 from darts.models.components import glu_variants, layer_norm_variants
 from darts.models.components.glu_variants import GLU_FFN
 try:
-    from darts.models.forecasting.tft_submodels import (
+    from darts.models.components.tft_submodels import (
         _GateAddNorm,
         _GatedResidualNetwork,
         _InterpretableMultiHeadAttention,
