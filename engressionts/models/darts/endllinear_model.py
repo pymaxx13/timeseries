@@ -165,7 +165,7 @@ class _EnDLinearModule(EngressionPLModule):
             `x_future` is the output/future chunk. Input dimensions are `(n_samples, n_time_steps, n_variables)`
         """
 
-        x, x_future, x_static = x_in  # x: (batch, in_len, in_dim)
+        x, x_future, x_static = x_in[:3]  # x: (batch, in_len, in_dim)
         x = self.noise_layer(x)
         batch, _, _ = x.shape
 
