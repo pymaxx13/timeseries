@@ -127,22 +127,40 @@ class CustomRNNModule(EngressionPLModule, ABC):
         return self(self._process_input_batch(input_batch))[0]
 
     def _process_input_batch(self, input_batch: TorchBatch) -> PLModuleInput:
-        (
-            past_target,
-            _,
-            future_covariates,
-            static_covariates,
-            future_target,
-        ) = input_batch
-        # For the RNN we concatenate the past_target with the future_covariates
-        # (they have the same length because we enforce a Shift dataset for RNNs)
-        input_batch = (
-            past_target,
-            future_covariates,  # future covariates as past covariates for RNN input
-            None,
-            None,
-            static_covariates,
-        )
+        if len(input_batch) == 6:
+            (
+                past_target,
+                _,
+                _,
+                future_covariates,
+                static_covariates,
+                future_target,
+            ) = input_batch
+            # For the RNN we concatenate the past_target with the future_covariates
+            # (they have the same length because we enforce a Shift dataset for RNNs)
+            input_batch = (
+                past_target,
+                future_covariates,  # future covariates as past covariates for RNN input
+                None,
+                None,
+                static_covariates,
+                future_target,
+            )
+        else:
+            (
+                past_target,
+                _,
+                future_covariates,
+                static_covariates,
+                future_target,
+            ) = input_batch
+            input_batch = (
+                past_target,
+                future_covariates,  # future covariates as past covariates for RNN input
+                None,
+                None,
+                static_covariates,
+            )
         return super()._process_input_batch(input_batch)
 
     def _produce_predict_output(

@@ -24,10 +24,10 @@ from darts.logging import get_logger, raise_log
 from darts.models.forecasting.foundation_model import FoundationModel
 from darts.models.forecasting.pl_forecasting_module import PLForecastingModule
 from darts.utils.data.torch_datasets.utils import (
-    InputChunkLength,
     PLModuleInput,
     TorchTrainingSample,
 )
+InputChunkLength = int | tuple[int, int]
 from darts.utils.likelihood_models.torch import QuantileRegression
 
 from engressionts.base.base_engression import EngressionPLModule

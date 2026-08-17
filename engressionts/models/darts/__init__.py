@@ -3,62 +3,62 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    from engressionts.models.darts.block_rnn_model import EnBlockRNNModel
+    from engressionts.models.darts.enblock_rnn_model import EnBlockRNNModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnBlockRNNModel: {e}")
 
 try:
-    from engressionts.models.darts.chronos2_model import EnChronos2Model
+    from engressionts.models.darts.enchronos2_model import EnChronos2Model
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnChronos2Model: {e}")
 
 try:
-    from engressionts.models.darts.dllinear_model import EnDLinearModel
+    from engressionts.models.darts.endllinear_model import EnDLinearModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnDLinearModel: {e}")
 
 try:
-    from engressionts.models.darts.nbeats import EnBEATSModel
+    from engressionts.models.darts.enbeats import EnBEATSModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnBEATSModel: {e}")
 
 try:
-    from engressionts.models.darts.nhits import EnHiTSModel
+    from engressionts.models.darts.enhits import EnHiTSModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnHiTSModel: {e}")
 
 try:
-    from engressionts.models.darts.nlinear_model import EnNLinearModel
+    from engressionts.models.darts.ennlinear_model import EnNLinearModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnNLinearModel: {e}")
 
 try:
-    from engressionts.models.darts.rnn_model import EnRNNModel
+    from engressionts.models.darts.enrnn_model import EnRNNModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnRNNModel: {e}")
 
 try:
-    from engressionts.models.darts.tcn_model import EnTCNModel
+    from engressionts.models.darts.entcn_model import EnTCNModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnTCNModel: {e}")
 
 try:
-    from engressionts.models.darts.tft_model import EnTFTModel
+    from engressionts.models.darts.entft_model import EnTFTModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnTFTModel: {e}")
 
 try:
-    from engressionts.models.darts.tide_model import EnTiDEModel
+    from engressionts.models.darts.entide_model import EnTiDEModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnTiDEModel: {e}")
 
 try:
-    from engressionts.models.darts.tsmixer_model import EnTSMixerModel
+    from engressionts.models.darts.entsmixer_model import EnTSMixerModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnTSMixerModel: {e}")
 
 try:
-    from engressionts.models.darts.transformer import EnTransformerModel
+    from engressionts.models.darts.entransformer import EnTransformerModel
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Could not import EnTransformerModel: {e}")
 
@@ -75,4 +75,4 @@ except (ImportError, ModuleNotFoundError) as e:
 try:
     from engressionts.models.darts.entimesfm2p5_model import EnTimesFM2p5Model
 except (ImportError, ModuleNotFoundError) as e:
-    logger.warning(f"Could not import EnTimesFM2p5Model: {e}")
+    logger.warning(f"Could not import EnTimesFM2p5Model: {e}")

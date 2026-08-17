@@ -35,11 +35,18 @@ from darts.models.forecasting.pl_forecasting_module import (
     io_processor,
 )
 from darts.utils.data.torch_datasets.utils import (
-    InputChunkLength,
     PLModuleInput,
     TorchTrainingSample,
-    _parse_input_chunk_length,
 )
+InputChunkLength = int | tuple[int, int]
+
+try:
+    from darts.utils.data.torch_datasets.utils import _parse_input_chunk_length
+except ImportError:
+    def _parse_input_chunk_length(input_chunk_length):
+        if isinstance(input_chunk_length, tuple):
+            return input_chunk_length
+        return input_chunk_length, input_chunk_length
 from darts.utils.likelihood_models.torch import QuantileRegression
 
 from engressionts.base.base_engression import EngressionPLModule
