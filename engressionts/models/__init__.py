@@ -1,17 +1,20 @@
-from .darts import (
-    EnBEATSModel,
-    EnHiTSModel,
-    EnBlockRNNModel,
-    # EnChronos2Model,
-    EnDLinearModel,
-    EnNLinearModel,
-    EnRNNModel,
-    EnTCNModel,
-    EnTFTModel,
-    EnTiDEModel,
-    EnTSMixerModel,
-    EnTransformerModel,
-)
+try:
+    from .darts import (
+        EnBEATSModel,
+        EnHiTSModel,
+        EnBlockRNNModel,
+        # EnChronos2Model,
+        EnDLinearModel,
+        EnNLinearModel,
+        EnRNNModel,
+        EnTCNModel,
+        EnTFTModel,
+        EnTiDEModel,
+        EnTSMixerModel,
+        EnTransformerModel,
+    )
+except ImportError:
+    pass
 from .neuralforecast import EnPatchTST, EnAutoformer, EnInformer, EnFEDformer, EniTransformer, EnTimeXer, EnTimesNet, EnVanillaTransformer, EnTSMixerx, EnMLP, EnMLPMultivariate, EnKAN, EnBiTCN, EnXLinear, EnxLSTM, EnSOFTS, EnSOFTSSharp, EnStemGNN, EnRMoK, EnDeepAR, EnDeepNPTS, EnHINT
 
 __all__ = [

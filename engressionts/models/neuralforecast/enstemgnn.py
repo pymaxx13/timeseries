@@ -234,7 +234,7 @@ class EnStemGNN(NFEngressionBaseModel):
         dataloader_kwargs=None,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 20,
+        num_samples_train: int = 20, num_samples=None,
         **trainer_kwargs
     ):
         if loss is None:
@@ -257,7 +257,7 @@ class EnStemGNN(NFEngressionBaseModel):
             start_padding_enabled=start_padding_enabled,
             noise_std=noise_std,
             noise_type=noise_type,
-            num_samples=num_samples,
+            num_samples_train=num_samples_train, num_samples=num_samples,
             n_series=n_series,
             futr_exog_list=futr_exog_list,
             hist_exog_list=hist_exog_list,

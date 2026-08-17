@@ -351,7 +351,7 @@ class EnRMoK(NFEngressionBaseModel):
         dataloader_kwargs=None,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 20,
+        num_samples_train: int = 20, num_samples=None,
         **trainer_kwargs
     ):
         if loss is None:
@@ -394,7 +394,7 @@ class EnRMoK(NFEngressionBaseModel):
             dataloader_kwargs=dataloader_kwargs,
             noise_std=noise_std,
             noise_type=noise_type,
-            num_samples=num_samples,
+            num_samples_train=num_samples_train, num_samples=num_samples,
             **trainer_kwargs
         )
 

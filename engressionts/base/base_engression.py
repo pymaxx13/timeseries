@@ -17,16 +17,27 @@ class EngressionPLModule(PLForecastingModule):
         self,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 20,
+        num_samples_train: int = 20,
+        num_samples: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if num_samples is not None:
+            num_samples_train = num_samples
 
         self.noise_std = noise_std
         self.noise_type = noise_type
-        self.num_samples = num_samples
+        self.num_samples_train = num_samples_train
 
         self.noise_layer = self._build_noise_layer()
+
+    @property
+    def num_samples(self) -> int:
+        return self.num_samples_train
+
+    @num_samples.setter
+    def num_samples(self, value: int):
+        self.num_samples_train = value
 
     def _build_noise_layer(self):
         try:
@@ -38,7 +49,7 @@ class EngressionPLModule(PLForecastingModule):
 
     def _repeat_tensor(self, tensor):
         return (
-            tensor.repeat_interleave(self.num_samples, dim=0)
+            tensor.repeat_interleave(self.num_samples_train, dim=0)
             if tensor is not None
             else None
         )
@@ -76,7 +87,7 @@ class EngressionPLModule(PLForecastingModule):
         y_hat = y_hat.squeeze(-1)
         samples = y_hat.view(
             batch_size,
-            self.num_samples,
+            self.num_samples_train,
             y_hat.shape[1],
             y_hat.shape[2],
         ).permute(1, 0, 2, 3)
@@ -101,6 +112,12 @@ class EngressionPLModule(PLForecastingModule):
         finally:
             self.noise_layer.train(noise_layer_was_training)
 
+    def on_predict_start(self) -> None:
+        super().on_predict_start()
+        if hasattr(self, "noise_layer") and self.noise_layer is not None:
+            seed = torch.initial_seed()
+            self.noise_layer.reset_seed(seed)
+
 
 class NFEngressionBaseModel(BaseModel):
     def __init__(
@@ -119,7 +136,8 @@ class NFEngressionBaseModel(BaseModel):
         start_padding_enabled: bool = False,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
-        num_samples: int = 20,
+        num_samples_train: int = 20,
+        num_samples: Optional[int] = None,
         **kwargs,
     ):
         if loss is None:
@@ -142,11 +160,35 @@ class NFEngressionBaseModel(BaseModel):
             start_padding_enabled=start_padding_enabled,
             **kwargs,
         )
+        if num_samples is not None:
+            num_samples_train = num_samples
+
         self.noise_std = noise_std
         self.noise_type = noise_type
-        self.num_samples = num_samples
+        self.num_samples_train = num_samples_train
 
         self.noise_layer = self._build_noise_layer()
+
+        # Locate the wrapping Darts module if instantiated via Darts
+        import inspect
+        frame = inspect.currentframe()
+        while frame:
+            locs = frame.f_locals
+            if "self" in locs:
+                parent = locs["self"]
+                if parent.__class__.__name__ == "_NeuralForecastModule":
+                    self.__dict__["darts_module"] = parent
+                    break
+            frame = frame.f_back
+
+
+    @property
+    def num_samples(self) -> int:
+        return self.num_samples_train
+
+    @num_samples.setter
+    def num_samples(self, value: int):
+        self.num_samples_train = value
 
     def _build_noise_layer(self):
         try:
@@ -159,7 +201,7 @@ class NFEngressionBaseModel(BaseModel):
     def _repeat_tensor(self, tensor, dim=0):
         if tensor is None:
             return None
-        return tensor.repeat_interleave(self.num_samples, dim=dim)
+        return tensor.repeat_interleave(self.num_samples_train, dim=dim)
 
     def training_step(self, batch, batch_idx):
         if self.RECURRENT:
@@ -250,7 +292,7 @@ class NFEngressionBaseModel(BaseModel):
         unnormalized_target = original_outsample_y
 
         B = original_outsample_y.shape[0]
-        samples = unnormalized_output.view(B, self.num_samples, self.h, -1).permute(1, 0, 2, 3)
+        samples = unnormalized_output.view(B, self.num_samples_train, self.h, -1).permute(1, 0, 2, 3)
 
         # Compute Energy Score loss
         loss = self.loss(y=unnormalized_target, y_hat=samples, mask=outsample_mask)
@@ -362,7 +404,7 @@ class NFEngressionBaseModel(BaseModel):
             unnormalized_output = self.scaler.inverse_transform(z=output_batch, x_scale=repeated_y_scale, x_shift=repeated_y_loc)
 
             B = original_outsample_y.shape[0]
-            samples = unnormalized_output.view(B, self.num_samples, self.h, -1).permute(1, 0, 2, 3)
+            samples = unnormalized_output.view(B, self.num_samples_train, self.h, -1).permute(1, 0, 2, 3)
 
             # Compute Energy Score loss
             loss_batch = self.valid_loss(y=original_outsample_y, y_hat=samples, mask=outsample_mask)
@@ -385,153 +427,234 @@ class NFEngressionBaseModel(BaseModel):
             prog_bar=True,
             on_epoch=True,
         )
-        self.validation_step_outputs.append(valid_loss_log)
+        self.validation_step_outputs.append(torch.tensor([valid_loss_log * batch_size, batch_size], device=valid_loss_log.device))
         return valid_loss
 
     def _predict_step_direct_batch(
         self, insample_y, insample_mask, hist_exog, futr_exog, stat_exog, y_idx
     ):
-        # Repeat parsed window batches M times along batch dim (dim=0)
-        repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
-        repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
-        repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
-        repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
-        if stat_exog is not None and not self.MULTIVARIATE:
-            repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
-        else:
-            repeated_stat_exog = stat_exog
+        # Force noise layer to train mode during prediction to generate stochastic samples
+        noise_was_training = self.noise_layer.training
+        self.noise_layer.train()
 
-        windows_batch = dict(
-            insample_y=repeated_insample_y,
-            insample_mask=repeated_insample_mask,
-            futr_exog=repeated_futr_exog,
-            hist_exog=repeated_hist_exog,
-            stat_exog=repeated_stat_exog,
-        )
+        try:
+            # Repeat parsed window batches M times along batch dim (dim=0)
+            repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
+            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
+            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
+            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
+            if stat_exog is not None and not self.MULTIVARIATE:
+                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
+            else:
+                repeated_stat_exog = stat_exog
 
-        # Model Predictions
-        output_batch = self(windows_batch)
-        output_batch = self.loss.domain_map(output_batch)
+            windows_batch = dict(
+                insample_y=repeated_insample_y,
+                insample_mask=repeated_insample_mask,
+                futr_exog=repeated_futr_exog,
+                hist_exog=repeated_hist_exog,
+                stat_exog=repeated_stat_exog,
+            )
 
-        # Inverse normalization using y_loc and y_scale context stats
-        y_loc, y_scale = self._get_loc_scale(y_idx)
-        repeated_y_loc = self._repeat_tensor(y_loc, dim=0)
-        repeated_y_scale = self._repeat_tensor(y_scale, dim=0)
-        unnormalized_output = self.scaler.inverse_transform(z=output_batch, x_scale=repeated_y_scale, x_shift=repeated_y_loc)
+            # Model Predictions
+            output_batch = self(windows_batch)
+            output_batch = self.loss.domain_map(output_batch)
 
-        B = insample_y.shape[0]
-        # Reshape to separate batch and sample dimensions
-        samples = unnormalized_output.view(B, self.num_samples, self.h, -1)  # [B, M, H, D]
+            # Inverse normalization using y_loc and y_scale context stats
+            y_loc, y_scale = self._get_loc_scale(y_idx)
+            repeated_y_loc = self._repeat_tensor(y_loc, dim=0)
+            repeated_y_scale = self._repeat_tensor(y_scale, dim=0)
+            unnormalized_output = self.scaler.inverse_transform(z=output_batch, x_scale=repeated_y_scale, x_shift=repeated_y_loc)
 
-        # Aggregate prediction samples to match NeuralForecast's expected output schema
-        if hasattr(self.loss, "quantiles") and self.loss.quantiles is not None and len(self.loss.quantiles) > 0:
-            qs = self.loss.quantiles.to(samples.device)
-            quantile_forecasts = torch.quantile(samples, q=qs, dim=1)  # [len(qs), B, H, D]
-            y_hat = quantile_forecasts.permute(1, 2, 3, 0)  # [B, H, D, len(qs)]
-        else:
-            y_hat = samples.mean(dim=1).unsqueeze(-1)  # [B, H, D, 1]
+            B = insample_y.shape[0]
+            # Reshape to separate batch and sample dimensions: [B, M, H, D]
+            samples = unnormalized_output.view(B, self.num_samples_train, self.h, -1)
 
-        n_outputs = len(self.loss.output_names)
+            # Store the raw samples on the model object for research evaluation
+            if not hasattr(self, "_last_raw_samples"):
+                self._last_raw_samples = []
+            self._last_raw_samples.append(samples.detach().cpu())
 
-        if not self.MULTIVARIATE:
-            y_hat = y_hat.squeeze(2)  # [B, H, n_outputs]
-            if n_outputs == 1:
-                y_hat = y_hat.squeeze(-1)  # [B, H]
-        else:
-            if n_outputs == 1:
-                y_hat = y_hat.squeeze(-1)  # [B, H, D]
+            # Aggregate prediction samples to match NeuralForecast's expected output schema
+            if hasattr(self.loss, "quantiles") and self.loss.quantiles is not None and len(self.loss.quantiles) > 0:
+                qs = self.loss.quantiles.to(samples.device)
+                quantile_forecasts = torch.quantile(samples, q=qs, dim=1)  # [len(qs), B, H, D]
+                y_hat = quantile_forecasts.permute(1, 2, 3, 0)  # [B, H, D, len(qs)]
+            else:
+                y_hat = samples.mean(dim=1).unsqueeze(-1)  # [B, H, D, 1]
 
-        return y_hat
+            n_outputs = len(self.loss.output_names)
+
+            if not self.MULTIVARIATE:
+                y_hat = y_hat.squeeze(2)  # [B, H, n_outputs]
+                if n_outputs == 1:
+                    y_hat = y_hat.squeeze(-1)  # [B, H]
+            else:
+                if n_outputs == 1:
+                    y_hat = y_hat.squeeze(-1)  # [B, H, D]
+
+            return y_hat
+        finally:
+            self.noise_layer.train(noise_was_training)
 
     def _predict_step_recurrent_batch(
         self, insample_y, insample_mask, futr_exog, hist_exog, stat_exog, y_idx
     ):
-        # Remember state in network and set horizon to 1
-        self.rnn_state = None
-        self.maintain_state = True
-        self.h = 1
+        # Force noise layer to train mode during prediction to generate stochastic samples
+        noise_was_training = self.noise_layer.training
+        self.noise_layer.train()
 
-        # Repeat parsed window batches M times along batch dim (dim=0)
-        repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
-        repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
-        repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
-        repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
-        if stat_exog is not None and not self.MULTIVARIATE:
-            repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
-        else:
-            repeated_stat_exog = stat_exog
+        try:
+            # Remember state in network and set horizon to 1
+            self.rnn_state = None
+            self.maintain_state = True
+            self.h = 1
 
-        # Temporarily repeat scaler stats to batch size B * M
-        original_x_scale = None
-        original_x_shift = None
-        if hasattr(self.scaler, "x_scale") and self.scaler.x_scale is not None:
-            original_x_scale = self.scaler.x_scale
-            original_x_shift = self.scaler.x_shift
-            self.scaler.x_scale = self._repeat_tensor(original_x_scale, dim=0)
-            self.scaler.x_shift = self._repeat_tensor(original_x_shift, dim=0)
-
-        y_hat_temp = torch.zeros(
-            (repeated_insample_y.shape[0], self.predict_horizon, repeated_insample_y.shape[2], 1),
-            device=insample_y.device,
-            dtype=insample_y.dtype,
-        )
-
-        curr_insample_y = repeated_insample_y
-        curr_insample_mask = repeated_insample_mask
-
-        for tau in range(self.predict_horizon):
-            if tau == 0:
-                hist_exog_current = hist_exog[:, : self.input_size] if self.hist_exog_size > 0 else None
-                futr_exog_current = futr_exog[:, : self.input_size] if self.futr_exog_size > 0 else None
-                hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
-                futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
+            # Repeat parsed window batches M times along batch dim (dim=0)
+            repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
+            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
+            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
+            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
+            if stat_exog is not None and not self.MULTIVARIATE:
+                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
             else:
-                hist_exog_current = hist_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.hist_exog_size > 0 else None
-                futr_exog_current = futr_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.futr_exog_size > 0 else None
-                hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
-                futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
+                repeated_stat_exog = stat_exog
 
-            # Reuses standard recursive step calculations (_predict_step_recurrent_single)
-            y_hat_step, curr_insample_y = self._predict_step_recurrent_single(
-                insample_y=curr_insample_y,
-                insample_mask=curr_insample_mask if tau == 0 else None,
-                hist_exog=hist_exog_current,
-                futr_exog=futr_exog_current,
-                stat_exog=repeated_stat_exog,
-                y_idx=y_idx,
+            # Temporarily repeat scaler stats to batch size B * M
+            original_x_scale = None
+            original_x_shift = None
+            if hasattr(self.scaler, "x_scale") and self.scaler.x_scale is not None:
+                original_x_scale = self.scaler.x_scale
+                original_x_shift = self.scaler.x_shift
+                self.scaler.x_scale = self._repeat_tensor(original_x_scale, dim=0)
+                self.scaler.x_shift = self._repeat_tensor(original_x_shift, dim=0)
+
+            y_hat_temp = torch.zeros(
+                (repeated_insample_y.shape[0], self.predict_horizon, repeated_insample_y.shape[2], 1),
+                device=insample_y.device,
+                dtype=insample_y.dtype,
             )
 
-            y_hat_temp[:, tau] = y_hat_step if y_hat_step.ndim == 3 else y_hat_step.unsqueeze(-1)
+            curr_insample_y = repeated_insample_y
+            curr_insample_mask = repeated_insample_mask
 
-        # Restore original scaler stats
-        if original_x_scale is not None:
-            self.scaler.x_scale = original_x_scale
-            self.scaler.x_shift = original_x_shift
+            for tau in range(self.predict_horizon):
+                if tau == 0:
+                    hist_exog_current = hist_exog[:, : self.input_size] if self.hist_exog_size > 0 else None
+                    futr_exog_current = futr_exog[:, : self.input_size] if self.futr_exog_size > 0 else None
+                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
+                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
+                else:
+                    hist_exog_current = hist_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.hist_exog_size > 0 else None
+                    futr_exog_current = futr_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.futr_exog_size > 0 else None
+                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
+                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
 
-        # Reset state and horizon
-        self.maintain_state = False
-        self.rnn_state = None
-        self.h = self.horizon_backup
+                # Reuses standard recursive step calculations (_predict_step_recurrent_single)
+                y_hat_step, curr_insample_y = self._predict_step_recurrent_single(
+                    insample_y=curr_insample_y,
+                    insample_mask=curr_insample_mask if tau == 0 else None,
+                    hist_exog=hist_exog_current,
+                    futr_exog=futr_exog_current,
+                    stat_exog=repeated_stat_exog,
+                    y_idx=y_idx,
+                )
 
-        # Reshape to [B, M, H, D]
-        samples = y_hat_temp.squeeze(-1).view(insample_y.shape[0], self.num_samples, self.predict_horizon, insample_y.shape[2])
+                y_hat_temp[:, tau] = y_hat_step if y_hat_step.ndim == 3 else y_hat_step.unsqueeze(-1)
 
-        # Aggregate prediction samples to match NeuralForecast's expected output schema
-        if hasattr(self.loss, "quantiles") and self.loss.quantiles is not None and len(self.loss.quantiles) > 0:
-            qs = self.loss.quantiles.to(samples.device)
-            quantile_forecasts = torch.quantile(samples, q=qs, dim=1)  # [len(qs), B, H, D]
-            y_hat = quantile_forecasts.permute(1, 2, 3, 0)  # [B, H, D, len(qs)]
-        else:
-            y_hat = samples.mean(dim=1).unsqueeze(-1)  # [B, H, D, 1]
+            # Restore original scaler stats
+            if original_x_scale is not None:
+                self.scaler.x_scale = original_x_scale
+                self.scaler.x_shift = original_x_shift
 
-        n_outputs = len(self.loss.output_names)
+            # Reset state and horizon
+            self.maintain_state = False
+            self.rnn_state = None
+            self.h = self.horizon_backup
 
-        if not self.MULTIVARIATE:
-            y_hat = y_hat.squeeze(2)  # [B, H, n_outputs]
-            if n_outputs == 1:
-                y_hat = y_hat.squeeze(-1)  # [B, H]
-        else:
-            if n_outputs == 1:
-                y_hat = y_hat.squeeze(-1)  # [B, H, D]
+            # Reshape to [B, M, H, D]
+            samples = y_hat_temp.squeeze(-1).view(insample_y.shape[0], self.num_samples_train, self.predict_horizon, insample_y.shape[2])
 
-        return y_hat
+            # Store the raw samples on the model object for research evaluation
+            if not hasattr(self, "_last_raw_samples"):
+                self._last_raw_samples = []
+            self._last_raw_samples.append(samples.detach().cpu())
+
+            # Aggregate prediction samples to match NeuralForecast's expected output schema
+            if hasattr(self.loss, "quantiles") and self.loss.quantiles is not None and len(self.loss.quantiles) > 0:
+                qs = self.loss.quantiles.to(samples.device)
+                quantile_forecasts = torch.quantile(samples, q=qs, dim=1)  # [len(qs), B, H, D]
+                y_hat = quantile_forecasts.permute(1, 2, 3, 0)  # [B, H, D, len(qs)]
+            else:
+                y_hat = samples.mean(dim=1).unsqueeze(-1)  # [B, H, D, 1]
+
+            n_outputs = len(self.loss.output_names)
+
+            if not self.MULTIVARIATE:
+                y_hat = y_hat.squeeze(2)  # [B, H, n_outputs]
+                if n_outputs == 1:
+                    y_hat = y_hat.squeeze(-1)  # [B, H]
+            else:
+                if n_outputs == 1:
+                    y_hat = y_hat.squeeze(-1)  # [B, H, D]
+
+            return y_hat
+        finally:
+            self.noise_layer.train(noise_was_training)
+
+
+# Patch Darts' TorchForecastingModel to support num_samples as a property mapping to num_samples_train
+from darts.models.forecasting.torch_forecasting_model import TorchForecastingModel
+
+if not hasattr(TorchForecastingModel, "_is_patched_engression_samples"):
+    @property
+    def _num_samples_prop(self):
+        return getattr(self, "num_samples_train", 1)
+
+    @_num_samples_prop.setter
+    def _num_samples_prop(self, value):
+        self.num_samples_train = value
+
+    TorchForecastingModel.num_samples = _num_samples_prop
+    TorchForecastingModel._is_patched_engression_samples = True
+
+
+try:
+    from darts.models.forecasting.nf_model import _NeuralForecastModule
+
+    if not hasattr(_NeuralForecastModule, "_is_patched_engression"):
+        _orig_supports_probabilistic_prediction = _NeuralForecastModule.supports_probabilistic_prediction.fget
+        _orig_on_predict_start = _NeuralForecastModule.on_predict_start
+        _orig_predict_step = _NeuralForecastModule.predict_step
+
+        def custom_supports_probabilistic_prediction(module_self):
+            if hasattr(module_self, "nf") and isinstance(module_self.nf, NFEngressionBaseModel):
+                return True
+            return _orig_supports_probabilistic_prediction(module_self)
+
+        def custom_on_predict_start(module_self):
+            _orig_on_predict_start(module_self)
+            if hasattr(module_self, "nf") and isinstance(module_self.nf, NFEngressionBaseModel):
+                if hasattr(module_self.nf, "noise_layer") and module_self.nf.noise_layer is not None:
+                    seed = torch.initial_seed()
+                    module_self.nf.noise_layer.reset_seed(seed)
+
+        def custom_predict_step(module_self, batch, batch_idx, dataloader_idx=None):
+            is_probabilistic = getattr(module_self, "pred_num_samples", 1) > 1
+            if is_probabilistic and hasattr(module_self, "nf") and hasattr(module_self.nf, "noise_layer") and module_self.nf.noise_layer is not None:
+                noise_was_training = module_self.nf.noise_layer.training
+                module_self.nf.noise_layer.train()
+                try:
+                    return _orig_predict_step(module_self, batch, batch_idx, dataloader_idx)
+                finally:
+                    module_self.nf.noise_layer.train(noise_was_training)
+            return _orig_predict_step(module_self, batch, batch_idx, dataloader_idx)
+
+        _NeuralForecastModule.supports_probabilistic_prediction = property(custom_supports_probabilistic_prediction)
+        _NeuralForecastModule.on_predict_start = custom_on_predict_start
+        _NeuralForecastModule.predict_step = custom_predict_step
+        _NeuralForecastModule._is_patched_engression = True
+except ImportError:
+    pass
+
+
