@@ -19,6 +19,7 @@ class EngressionPLModule(PLForecastingModule):
         noise_type: str = "gaussian",
         num_samples_train: int = 20,
         num_samples: Optional[int] = None,
+        clip_preds: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -28,16 +29,9 @@ class EngressionPLModule(PLForecastingModule):
         self.noise_std = noise_std
         self.noise_type = noise_type
         self.num_samples_train = num_samples_train
+        self.clip_preds = clip_preds
 
         self.noise_layer = self._build_noise_layer()
-
-    @property
-    def num_samples(self) -> int:
-        return self.num_samples_train
-
-    @num_samples.setter
-    def num_samples(self, value: int):
-        self.num_samples_train = value
 
     def _build_noise_layer(self):
         try:
@@ -109,7 +103,10 @@ class EngressionPLModule(PLForecastingModule):
         noise_layer_was_training = self.noise_layer.training
         self.noise_layer.train()
         try:
-            return super().predict_step(batch, batch_idx, dataloader_idx)
+            y_hat = super().predict_step(batch, batch_idx, dataloader_idx)
+            if getattr(self, "clip_preds", False):
+                y_hat = torch.clamp(y_hat, min=0.0)
+            return y_hat
         finally:
             self.noise_layer.train(noise_layer_was_training)
 
@@ -139,6 +136,7 @@ class NFEngressionBaseModel(BaseModel):
         noise_type: str = "gaussian",
         num_samples_train: int = 20,
         num_samples: Optional[int] = None,
+        clip_preds: bool = False,
         **kwargs,
     ):
         if loss is None:
@@ -167,6 +165,7 @@ class NFEngressionBaseModel(BaseModel):
         self.noise_std = noise_std
         self.noise_type = noise_type
         self.num_samples_train = num_samples_train
+        self.clip_preds = clip_preds
 
         self.noise_layer = self._build_noise_layer()
 
@@ -182,15 +181,6 @@ class NFEngressionBaseModel(BaseModel):
                     break
             frame = frame.f_back
 
-
-    @property
-    def num_samples(self) -> int:
-        return self.num_samples_train
-
-    @num_samples.setter
-    def num_samples(self, value: int):
-        self.num_samples_train = value
-
     def _build_noise_layer(self):
         try:
             noise_cls = NOISE_REGISTRY[self.noise_type]
@@ -199,10 +189,11 @@ class NFEngressionBaseModel(BaseModel):
 
         return noise_cls(std=self.noise_std)
 
-    def _repeat_tensor(self, tensor, dim=0):
+    def _repeat_tensor(self, tensor, dim=0, num_samples=None):
         if tensor is None:
             return None
-        return tensor.repeat_interleave(self.num_samples_train, dim=dim)
+        n = num_samples if num_samples is not None else self.num_samples_train
+        return tensor.repeat_interleave(n, dim=dim)
 
     def training_step(self, batch, batch_idx):
         if self.RECURRENT:
@@ -439,13 +430,17 @@ class NFEngressionBaseModel(BaseModel):
         self.noise_layer.train()
 
         try:
+            # Darts sets pred_num_samples on the wrapper PLModule
+            darts_mod = getattr(self, "darts_module", self)
+            M = getattr(darts_mod, "pred_num_samples", self.num_samples_train)
+            
             # Repeat parsed window batches M times along batch dim (dim=0)
-            repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
-            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
-            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
-            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
+            repeated_insample_y = self._repeat_tensor(insample_y, dim=0, num_samples=M)
+            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0, num_samples=M)
+            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0, num_samples=M)
+            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0, num_samples=M)
             if stat_exog is not None and not self.MULTIVARIATE:
-                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
+                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0, num_samples=M)
             else:
                 repeated_stat_exog = stat_exog
 
@@ -469,7 +464,7 @@ class NFEngressionBaseModel(BaseModel):
 
             B = insample_y.shape[0]
             # Reshape to separate batch and sample dimensions: [B, M, H, D]
-            samples = unnormalized_output.view(B, self.num_samples_train, self.h, -1)
+            samples = unnormalized_output.view(B, M, self.h, -1)
 
             # Store the raw samples on the model object for research evaluation
             if not hasattr(self, "_last_raw_samples"):
@@ -494,6 +489,9 @@ class NFEngressionBaseModel(BaseModel):
                 if n_outputs == 1:
                     y_hat = y_hat.squeeze(-1)  # [B, H, D]
 
+            if getattr(self, "clip_preds", False):
+                y_hat = torch.clamp(y_hat, min=0.0)
+
             return y_hat
         finally:
             self.noise_layer.train(noise_was_training)
@@ -506,18 +504,22 @@ class NFEngressionBaseModel(BaseModel):
         self.noise_layer.train()
 
         try:
+            # Darts sets pred_num_samples on the wrapper PLModule
+            darts_mod = getattr(self, "darts_module", self)
+            M = getattr(darts_mod, "pred_num_samples", self.num_samples_train)
+            
             # Remember state in network and set horizon to 1
             self.rnn_state = None
             self.maintain_state = True
             self.h = 1
 
             # Repeat parsed window batches M times along batch dim (dim=0)
-            repeated_insample_y = self._repeat_tensor(insample_y, dim=0)
-            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0)
-            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0)
-            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0)
+            repeated_insample_y = self._repeat_tensor(insample_y, dim=0, num_samples=M)
+            repeated_insample_mask = self._repeat_tensor(insample_mask, dim=0, num_samples=M)
+            repeated_hist_exog = self._repeat_tensor(hist_exog, dim=0, num_samples=M)
+            repeated_futr_exog = self._repeat_tensor(futr_exog, dim=0, num_samples=M)
             if stat_exog is not None and not self.MULTIVARIATE:
-                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0)
+                repeated_stat_exog = self._repeat_tensor(stat_exog, dim=0, num_samples=M)
             else:
                 repeated_stat_exog = stat_exog
 
@@ -527,8 +529,8 @@ class NFEngressionBaseModel(BaseModel):
             if hasattr(self.scaler, "x_scale") and self.scaler.x_scale is not None:
                 original_x_scale = self.scaler.x_scale
                 original_x_shift = self.scaler.x_shift
-                self.scaler.x_scale = self._repeat_tensor(original_x_scale, dim=0)
-                self.scaler.x_shift = self._repeat_tensor(original_x_shift, dim=0)
+                self.scaler.x_scale = self._repeat_tensor(original_x_scale, dim=0, num_samples=M)
+                self.scaler.x_shift = self._repeat_tensor(original_x_shift, dim=0, num_samples=M)
 
             y_hat_temp = torch.zeros(
                 (repeated_insample_y.shape[0], self.predict_horizon, repeated_insample_y.shape[2], 1),
@@ -543,13 +545,13 @@ class NFEngressionBaseModel(BaseModel):
                 if tau == 0:
                     hist_exog_current = hist_exog[:, : self.input_size] if self.hist_exog_size > 0 else None
                     futr_exog_current = futr_exog[:, : self.input_size] if self.futr_exog_size > 0 else None
-                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
-                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
+                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0, num_samples=M)
+                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0, num_samples=M)
                 else:
                     hist_exog_current = hist_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.hist_exog_size > 0 else None
                     futr_exog_current = futr_exog[:, self.input_size + tau - 1].unsqueeze(1) if self.futr_exog_size > 0 else None
-                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0)
-                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0)
+                    hist_exog_current = self._repeat_tensor(hist_exog_current, dim=0, num_samples=M)
+                    futr_exog_current = self._repeat_tensor(futr_exog_current, dim=0, num_samples=M)
 
                 # Reuses standard recursive step calculations (_predict_step_recurrent_single)
                 y_hat_step, curr_insample_y = self._predict_step_recurrent_single(
@@ -574,7 +576,7 @@ class NFEngressionBaseModel(BaseModel):
             self.h = self.horizon_backup
 
             # Reshape to [B, M, H, D]
-            samples = y_hat_temp.squeeze(-1).view(insample_y.shape[0], self.num_samples_train, self.predict_horizon, insample_y.shape[2])
+            samples = y_hat_temp.squeeze(-1).view(insample_y.shape[0], M, self.predict_horizon, insample_y.shape[2])
 
             # Store the raw samples on the model object for research evaluation
             if not hasattr(self, "_last_raw_samples"):
@@ -599,26 +601,67 @@ class NFEngressionBaseModel(BaseModel):
                 if n_outputs == 1:
                     y_hat = y_hat.squeeze(-1)  # [B, H, D]
 
+            if getattr(self, "clip_preds", False):
+                y_hat = torch.clamp(y_hat, min=0.0)
+
             return y_hat
         finally:
             self.noise_layer.train(noise_was_training)
 
 
-# Patch Darts' TorchForecastingModel to support num_samples as a property mapping to num_samples_train
-from darts.models.forecasting.torch_forecasting_model import TorchForecastingModel
 
-if not hasattr(TorchForecastingModel, "_is_patched_engression_samples"):
-    @property
-    def _num_samples_prop(self):
-        return getattr(self, "num_samples_train", 1)
 
-    @_num_samples_prop.setter
-    def _num_samples_prop(self, value):
-        self.num_samples_train = value
 
-    TorchForecastingModel.num_samples = _num_samples_prop
-    TorchForecastingModel._is_patched_engression_samples = True
+try:
+    from darts.models.forecasting.torch_forecasting_model import TorchForecastingModel
 
+    if not hasattr(TorchForecastingModel, "_is_patched_engression_clip"):
+        _orig_predict = TorchForecastingModel.predict
+
+        def custom_predict(self, *args, clip_preds: bool = False, **kwargs):
+            # Intercept clip_preds at the prediction API level
+            forecasts = _orig_predict(self, *args, **kwargs)
+            if clip_preds:
+                if isinstance(forecasts, list) or isinstance(forecasts, tuple):
+                    return type(forecasts)(
+                        [f.with_values(np.clip(f.all_values(), a_min=0, a_max=None)) for f in forecasts]
+                    )
+                else:
+                    return forecasts.with_values(np.clip(forecasts.all_values(), a_min=0, a_max=None))
+            return forecasts
+
+        TorchForecastingModel.predict = custom_predict
+        TorchForecastingModel._is_patched_engression_clip = True
+
+except ImportError:
+    pass
+
+
+try:
+    from neuralforecast.common._base_model import BaseModel
+
+    if not hasattr(BaseModel, "_is_patched_engression_clip"):
+        _orig_nf_predict = BaseModel.predict
+
+        def custom_nf_predict(self, *args, clip_preds: bool = False, **kwargs):
+            # Intercept clip_preds at the prediction API level
+            forecasts = _orig_nf_predict(self, *args, **kwargs)
+            if clip_preds:
+                # BaseModel.predict returns a numpy array or tensor, wait, NeuralForecast's predict
+                # usually returns a numpy array or it's handled by core NeuralForecast dataframe prediction.
+                # Actually BaseModel.predict returns a numpy array of shape (..., 1) or similar.
+                if hasattr(forecasts, "numpy"):
+                    import torch
+                    return torch.clamp(forecasts, min=0.0)
+                else:
+                    return np.clip(forecasts, a_min=0.0, a_max=None)
+            return forecasts
+
+        BaseModel.predict = custom_nf_predict
+        BaseModel._is_patched_engression_clip = True
+
+except ImportError:
+    pass
 
 try:
     from darts.models.forecasting.nf_model import _NeuralForecastModule

@@ -120,4 +120,5 @@ class EnergyScoreLoss(BasePointLoss):
         if mask is not None and mask.ndim == 2:
             mask = mask.unsqueeze(-1)
             
-        return energy_score_loss(samples=y_hat, target=y, mask=mask)
+        # The current energy_score_loss implementation does not support mask
+        return energy_score_loss(samples=y_hat, target=y)
