@@ -615,12 +615,12 @@ class NFEngressionBaseModel(BaseModel):
 try:
     from darts.models.forecasting.torch_forecasting_model import TorchForecastingModel
 
-    if not hasattr(TorchForecastingModel, "_is_patched_engression_clip"):
-        _orig_predict = TorchForecastingModel.predict
+    if not hasattr(TorchForecastingModel, "_orig_predict_engression"):
+        TorchForecastingModel._orig_predict_engression = TorchForecastingModel.predict
 
         def custom_predict(self, *args, clip_preds: bool = False, **kwargs):
             # Intercept clip_preds at the prediction API level
-            forecasts = _orig_predict(self, *args, **kwargs)
+            forecasts = self._orig_predict_engression(*args, **kwargs)
             if clip_preds:
                 if isinstance(forecasts, list) or isinstance(forecasts, tuple):
                     return type(forecasts)(
@@ -631,7 +631,6 @@ try:
             return forecasts
 
         TorchForecastingModel.predict = custom_predict
-        TorchForecastingModel._is_patched_engression_clip = True
 
 except ImportError:
     pass
@@ -640,12 +639,12 @@ except ImportError:
 try:
     from neuralforecast.common._base_model import BaseModel
 
-    if not hasattr(BaseModel, "_is_patched_engression_clip"):
-        _orig_nf_predict = BaseModel.predict
+    if not hasattr(BaseModel, "_orig_nf_predict_engression"):
+        BaseModel._orig_nf_predict_engression = BaseModel.predict
 
         def custom_nf_predict(self, *args, clip_preds: bool = False, **kwargs):
             # Intercept clip_preds at the prediction API level
-            forecasts = _orig_nf_predict(self, *args, **kwargs)
+            forecasts = self._orig_nf_predict_engression(*args, **kwargs)
             if clip_preds:
                 # BaseModel.predict returns a numpy array or tensor, wait, NeuralForecast's predict
                 # usually returns a numpy array or it's handled by core NeuralForecast dataframe prediction.
@@ -658,7 +657,6 @@ try:
             return forecasts
 
         BaseModel.predict = custom_nf_predict
-        BaseModel._is_patched_engression_clip = True
 
 except ImportError:
     pass
@@ -666,18 +664,18 @@ except ImportError:
 try:
     from darts.models.forecasting.nf_model import _NeuralForecastModule
 
-    if not hasattr(_NeuralForecastModule, "_is_patched_engression"):
-        _orig_supports_probabilistic_prediction = _NeuralForecastModule.supports_probabilistic_prediction.fget
-        _orig_on_predict_start = _NeuralForecastModule.on_predict_start
-        _orig_predict_step = _NeuralForecastModule.predict_step
+    if not hasattr(_NeuralForecastModule, "_orig_engression_supports_prob"):
+        _NeuralForecastModule._orig_engression_supports_prob = _NeuralForecastModule.supports_probabilistic_prediction.fget
+        _NeuralForecastModule._orig_engression_on_predict_start = _NeuralForecastModule.on_predict_start
+        _NeuralForecastModule._orig_engression_predict_step = _NeuralForecastModule.predict_step
 
         def custom_supports_probabilistic_prediction(module_self):
             if hasattr(module_self, "nf") and isinstance(module_self.nf, NFEngressionBaseModel):
                 return True
-            return _orig_supports_probabilistic_prediction(module_self)
+            return _NeuralForecastModule._orig_engression_supports_prob(module_self)
 
         def custom_on_predict_start(module_self):
-            _orig_on_predict_start(module_self)
+            _NeuralForecastModule._orig_engression_on_predict_start(module_self)
             if hasattr(module_self, "nf") and isinstance(module_self.nf, NFEngressionBaseModel):
                 if hasattr(module_self.nf, "noise_layer") and module_self.nf.noise_layer is not None:
                     seed = torch.initial_seed()
@@ -689,15 +687,14 @@ try:
                 noise_was_training = module_self.nf.noise_layer.training
                 module_self.nf.noise_layer.train()
                 try:
-                    return _orig_predict_step(module_self, batch, batch_idx, dataloader_idx)
+                    return _NeuralForecastModule._orig_engression_predict_step(module_self, batch, batch_idx, dataloader_idx)
                 finally:
                     module_self.nf.noise_layer.train(noise_was_training)
-            return _orig_predict_step(module_self, batch, batch_idx, dataloader_idx)
+            return _NeuralForecastModule._orig_engression_predict_step(module_self, batch, batch_idx, dataloader_idx)
 
         _NeuralForecastModule.supports_probabilistic_prediction = property(custom_supports_probabilistic_prediction)
         _NeuralForecastModule.on_predict_start = custom_on_predict_start
         _NeuralForecastModule.predict_step = custom_predict_step
-        _NeuralForecastModule._is_patched_engression = True
 except ImportError:
     pass
 

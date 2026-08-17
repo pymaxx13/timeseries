@@ -70,7 +70,8 @@ class _EngressionPLModule(_NeuralForecastModule):
         mask = torch.ones_like(future_target)
 
         # Compute Energy Score loss directly to avoid conflict with PyTorch/NeuralForecast __call__
-        loss = energy_score_loss(samples=samples, target=future_target, mask=mask)
+        # The current energy_score_loss implementation does not support mask
+        loss = energy_score_loss(samples=samples, target=future_target)
 
         if torch.isnan(loss):
             raise Exception("Loss is NaN, training stopped.")
