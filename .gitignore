@@ -2,6 +2,7 @@
 .venv/
 venv/
 env/
+.venv_nf_darts/
 
 # Python
 __pycache__/
@@ -21,3 +22,4 @@ lightning_logs/
 *.ckpt
 hparams.yaml
 *.pdf
+

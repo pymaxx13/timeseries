@@ -15,7 +15,7 @@ try:
     )
 except ImportError:
     pass
-from .neuralforecast import EnPatchTST, EnAutoformer, EnInformer, EnFEDformer, EniTransformer, EnTimeXer, EnTimesNet, EnVanillaTransformer, EnTSMixerx, EnMLP, EnMLPMultivariate, EnKAN, EnBiTCN, EnXLinear, EnxLSTM, EnSOFTS, EnSOFTSSharp, EnStemGNN, EnRMoK, EnDeepAR, EnDeepNPTS, EnHINT
+from .neuralforecast import EnPatchTST, EnAutoformer, EnInformer, EnFEDformer, EniTransformer, EnTimeXer, EnTimesNet, EnTSMixerx, EnMLP, EnMLPMultivariate, EnKAN, EnBiTCN, EnXLinear, EnxLSTM, EnSOFTS, EnSOFTSSharp, EnStemGNN, EnRMoK, EnHINT
 
 __all__ = [
     "EnBEATSModel",
@@ -37,7 +37,6 @@ __all__ = [
     "EniTransformer",
     "EnTimeXer",
     "EnTimesNet",
-    "EnVanillaTransformer",
     "EnTSMixerx",
     "EnMLP",
     "EnMLPMultivariate",
@@ -49,7 +48,5 @@ __all__ = [
     "EnSOFTSSharp",
     "EnStemGNN",
     "EnRMoK",
-    "EnDeepAR",
-    "EnDeepNPTS",
     "EnHINT",
 ]
