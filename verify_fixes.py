@@ -1,0 +1,16 @@
+import json
+notebook_path = r'C:\Users\Anusha\engression\engression-ts\engressionts\experiments\solar\baselines-solar-darts.ipynb'
+with open(notebook_path, 'r', encoding='utf-8') as f:
+    nb = json.load(f)
+for cell in nb['cells']:
+    if cell['cell_type'] == 'code':
+        source = "".join(cell['source'])
+        if 'def calibrate_conformal_model' in source:
+            print("=== CONFORMAL ===")
+            print(source)
+        if 'def make_model' in source:
+            print("=== MAKE_MODEL ===")
+            lines = source.split('\n')
+            for i, line in enumerate(lines):
+                if 'PatchTSTFM' in line or 'TiREx' in line:
+                    print('\n'.join(lines[i-2:i+7]))
